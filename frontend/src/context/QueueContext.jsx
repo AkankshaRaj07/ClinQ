@@ -19,6 +19,7 @@ export const QueueProvider = ({ children }) => {
     activeQueue: [],
     averageConsultationTime: 600,
     currentlyCalledToken: null,
+    completedToday: 0,
   });
 
   const [loading, setLoading] = useState(true);
@@ -79,6 +80,11 @@ export const QueueProvider = ({ children }) => {
     return response.data;
   };
 
+  const recallToken = async (tokenId) => {
+    const response = await axios.put(`http://localhost:5000/api/queue/${tokenId}/recall`);
+    return response.data;
+  };
+
   const value = {
     ...queueState,
     loading,
@@ -86,6 +92,7 @@ export const QueueProvider = ({ children }) => {
     callNext,
     completeToken,
     skipToken,
+    recallToken,
     resetQueue,
   };
 

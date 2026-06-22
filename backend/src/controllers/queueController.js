@@ -49,17 +49,31 @@ const calculateWaitTime = async () => {
 const broadcastQueueState = async () => {
   try {
     const settings = await QueueSettings.findOne();
-    const waitingCount = await QueueToken.countDocuments({ status: 'WAITING' });
-    const activeQueue = await QueueToken.find({ status: { $in: ['WAITING', 'CALLED'] } }).sort({ tokenNumber: 1 });
+    const waitingCount = await QueueToken.countDocuments({ status: { $in: ['WAITING', 'RECALLED'] } });
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const activeQueue = await QueueToken.find({ 
+      $or: [
+        { status: { $in: ['WAITING', 'CALLED', 'RECALLED'] } },
+        { status: 'SKIPPED', joinedAt: { $gte: startOfDay } }
+      ]
+    }).sort({ tokenNumber: 1 });
     const currentlyCalledToken = activeQueue.find(t => t.status === 'CALLED') || null;
     const averageConsultationTime = await calculateWaitTime();
+
+    const completedToday = await QueueToken.countDocuments({ 
+      status: 'COMPLETED',
+      completedAt: { $gte: startOfDay }
+    });
 
     io.getIO().emit('QUEUE_UPDATED', {
       currentToken: settings ? settings.currentToken : 0,
       waitingCount,
       activeQueue,
       averageConsultationTime,
-      currentlyCalledToken
+      currentlyCalledToken,
+      completedToday
     });
   } catch (error) {
     console.error('Error broadcasting state:', error);
@@ -77,13 +91,14 @@ exports.joinQueue = async (req, res) => {
     settings = await QueueSettings.findOneAndUpdate(
       {},
       { $inc: { nextTokenNumber: 1 } },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     const token = await QueueToken.create({
       patientName,
       phone,
       tokenNumber: settings.nextTokenNumber - 1, // since we incremented it
+      queueDate: new Date().toISOString().split('T')[0],
       status: 'WAITING'
     });
 
@@ -98,17 +113,31 @@ exports.getCurrentState = async (req, res) => {
   try {
     let settings = await checkDailyReset();
     
-    const waitingCount = await QueueToken.countDocuments({ status: 'WAITING' });
-    const activeQueue = await QueueToken.find({ status: { $in: ['WAITING', 'CALLED'] } }).sort({ tokenNumber: 1 });
+    const waitingCount = await QueueToken.countDocuments({ status: { $in: ['WAITING', 'RECALLED'] } });
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const activeQueue = await QueueToken.find({ 
+      $or: [
+        { status: { $in: ['WAITING', 'CALLED', 'RECALLED'] } },
+        { status: 'SKIPPED', joinedAt: { $gte: startOfDay } }
+      ]
+    }).sort({ tokenNumber: 1 });
     const currentlyCalledToken = activeQueue.find(t => t.status === 'CALLED') || null;
     const averageConsultationTime = await calculateWaitTime();
+
+    const completedToday = await QueueToken.countDocuments({ 
+      status: 'COMPLETED',
+      completedAt: { $gte: startOfDay }
+    });
 
     res.json({
       currentToken: settings.currentToken,
       waitingCount,
       averageConsultationTime,
       activeQueue,
-      currentlyCalledToken
+      currentlyCalledToken,
+      completedToday
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -118,7 +147,7 @@ exports.getCurrentState = async (req, res) => {
 exports.getTokenTracking = async (req, res) => {
   try {
     const { tokenNumber } = req.params;
-    const token = await QueueToken.findOne({ tokenNumber: Number(tokenNumber), status: { $in: ['WAITING', 'CALLED'] } });
+    const token = await QueueToken.findOne({ tokenNumber: Number(tokenNumber), status: { $in: ['WAITING', 'CALLED', 'RECALLED'] } });
     
     if (!token) {
       return res.status(404).json({ error: 'Token not found or no longer active' });
@@ -128,11 +157,21 @@ exports.getTokenTracking = async (req, res) => {
       return res.json({ tokenNumber: token.tokenNumber, status: 'CALLED', peopleAhead: 0, estimatedWaitTime: 0 });
     }
 
-    // WAITING token
-    const peopleAhead = await QueueToken.countDocuments({
-      status: 'WAITING',
-      tokenNumber: { $lt: token.tokenNumber }
-    });
+    // WAITING or RECALLED token
+    let peopleAhead = 0;
+    if (token.status === 'RECALLED') {
+      peopleAhead = await QueueToken.countDocuments({
+        status: 'RECALLED',
+        tokenNumber: { $lt: token.tokenNumber }
+      });
+    } else {
+      const recalledAhead = await QueueToken.countDocuments({ status: 'RECALLED' });
+      const waitingAhead = await QueueToken.countDocuments({
+        status: 'WAITING',
+        tokenNumber: { $lt: token.tokenNumber }
+      });
+      peopleAhead = recalledAhead + waitingAhead;
+    }
 
     const averageTime = await calculateWaitTime();
     const estimatedWaitTime = (peopleAhead + 1) * averageTime; // +1 to account for the person currently CALLED
@@ -155,12 +194,21 @@ exports.callNext = async (req, res) => {
       return res.status(400).json({ error: 'Complete or Skip the current token before calling the next patient.' });
     }
 
-    // Find the next waiting token (smallest tokenNumber)
-    const nextToken = await QueueToken.findOneAndUpdate(
-      { status: 'WAITING' },
+    // First check for RECALLED patients
+    let nextToken = await QueueToken.findOneAndUpdate(
+      { status: 'RECALLED' },
       { $set: { status: 'CALLED', calledAt: new Date() } },
-      { sort: { tokenNumber: 1 }, new: true }
+      { sort: { joinedAt: 1 }, returnDocument: 'after' }
     );
+
+    if (!nextToken) {
+      // Find the next waiting token (smallest tokenNumber)
+      nextToken = await QueueToken.findOneAndUpdate(
+        { status: 'WAITING' },
+        { $set: { status: 'CALLED', calledAt: new Date() } },
+        { sort: { tokenNumber: 1 }, returnDocument: 'after' }
+      );
+    }
 
     if (!nextToken) {
       return res.status(404).json({ error: 'No waiting patients.' });
@@ -172,6 +220,9 @@ exports.callNext = async (req, res) => {
     await broadcastQueueState();
     res.json(nextToken);
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Conflict: Another patient is already being called.' });
+    }
     res.status(500).json({ error: error.message });
   }
 };
@@ -229,8 +280,8 @@ exports.resetQueue = async (req, res) => {
       settings = await QueueSettings.create({});
     }
     
-    // Mark all WAITING and CALLED tokens as SKIPPED
-    await QueueToken.updateMany({ status: { $in: ['WAITING', 'CALLED'] } }, { status: 'SKIPPED' });
+    // Mark all WAITING, CALLED, and RECALLED tokens as SKIPPED
+    await QueueToken.updateMany({ status: { $in: ['WAITING', 'CALLED', 'RECALLED'] } }, { status: 'SKIPPED' });
 
     settings.nextTokenNumber = 1;
     settings.currentToken = 0;
@@ -239,6 +290,25 @@ exports.resetQueue = async (req, res) => {
 
     await broadcastQueueState();
     res.json({ message: 'Queue reset successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.recallToken = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const token = await QueueToken.findById(tokenId);
+
+    if (!token || token.status !== 'SKIPPED') {
+      return res.status(400).json({ error: 'Only skipped tokens can be recalled.' });
+    }
+
+    token.status = 'RECALLED';
+    await token.save();
+
+    await broadcastQueueState();
+    res.json(token);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

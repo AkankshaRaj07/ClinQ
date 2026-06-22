@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQueue } from '../context/QueueContext';
-import { Link } from 'react-router-dom';
+import Navbar from '../components/Navbar';
 
 const Dashboard = () => {
   const { 
@@ -14,6 +14,7 @@ const Dashboard = () => {
     callNext, 
     completeToken, 
     skipToken,
+    recallToken,
     resetQueue
   } = useQueue();
 
@@ -23,22 +24,6 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  
-  const [isDark, setIsDark] = useState(() => {
-    return document.documentElement.classList.contains('dark');
-  });
-
-  const toggleTheme = () => {
-    if (isDark) {
-      document.documentElement.classList.remove('dark');
-      localStorage.theme = 'light';
-      setIsDark(false);
-    } else {
-      document.documentElement.classList.add('dark');
-      localStorage.theme = 'dark';
-      setIsDark(true);
-    }
-  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -140,39 +125,9 @@ const Dashboard = () => {
       <main className="flex-1 w-full px-margin-mobile lg:px-margin-desktop pb-lg flex flex-col lg:overflow-hidden">
         
         {/* TopAppBar */}
-        <header className="flex justify-between items-center w-full h-16 sticky top-0 z-50 bg-surface/80 backdrop-blur-md border-b border-outline-variant shadow-sm mb-lg">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-extrabold text-primary tracking-tight">ClinQ</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden lg:flex items-center bg-surface-container-low rounded-full px-4 py-1.5 border border-outline-variant">
-              <span className="material-symbols-outlined text-outline mr-2 text-[20px]">search</span>
-              <input className="bg-transparent border-none focus:outline-none text-body-md w-48 text-on-surface placeholder:text-outline" placeholder="Search patients..." type="text"/>
-            </div>
-            <Link to="/patient" className="hidden sm:block text-on-surface-variant hover:text-primary transition-colors text-label-sm uppercase tracking-wider font-bold mr-2">
-              Patient View
-            </Link>
-            <Link to="/patient" className="sm:hidden text-on-surface-variant hover:text-primary transition-colors p-2 rounded-full hover:bg-surface-container-low">
-              <span className="material-symbols-outlined">tv</span>
-            </Link>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={toggleTheme}
-                className="p-2 text-on-surface-variant hover:bg-surface-container-low transition-colors rounded-full flex items-center justify-center"
-                title="Toggle Theme"
-              >
-                <span className="material-symbols-outlined">
-                  {isDark ? 'light_mode' : 'dark_mode'}
-                </span>
-              </button>
-              <button className="p-2 text-on-surface-variant hover:bg-surface-container-low transition-colors rounded-full">
-                <span className="material-symbols-outlined">account_circle</span>
-              </button>
-            </div>
-          </div>
-        </header>
+        <Navbar />
 
-        <div className="flex-1 flex flex-col lg:min-h-0 space-y-gutter">
+        <div className="flex-1 flex flex-col lg:min-h-0 space-y-gutter mt-lg">
           
           {/* Welcome Header */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -309,7 +264,7 @@ const Dashboard = () => {
                     </button>
                     <button 
                       onClick={handleCallNext}
-                      disabled={waitingCount === 0}
+                      disabled={activeQueue.filter(t => t.status === 'WAITING' || t.status === 'RECALLED').length === 0}
                       className="px-4 py-2 bg-primary-container text-on-primary-container rounded-lg text-label-sm font-bold hover:opacity-90 disabled:opacity-50 transition-all"
                     >
                       Call Next
@@ -333,18 +288,24 @@ const Dashboard = () => {
                       
                       {/* Active Token Row */}
                       {currentlyCalledToken && (
-                        <tr className="bg-primary/5 transition-colors group h-16">
+                        <tr className="bg-emerald-50 dark:bg-emerald-500/5 border-l-4 border-emerald-500 dark:border-emerald-400 transition-colors group h-16 relative">
                           <td className="px-md py-3">
-                            <span className="font-bold text-primary text-body-md">
-                              <span className="inline-block w-2 h-2 bg-tertiary rounded-full animate-pulse mr-2"></span>
-                              #{currentlyCalledToken.tokenNumber}
+                            <span className="font-black text-emerald-600 dark:text-emerald-400 text-lg flex items-center">
+                              <span className="relative flex h-3 w-3 mr-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 dark:bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 dark:bg-emerald-400"></span>
+                              </span>
+                              {currentlyCalledToken.tokenNumber}
                             </span>
                           </td>
                           <td className="px-md py-3">
                             <p className="font-bold text-on-background text-body-md">{currentlyCalledToken.patientName}</p>
                           </td>
                           <td className="px-md py-3">
-                            <span className="px-3 py-1 bg-primary-container/20 text-primary border border-primary/20 rounded-full text-label-sm">Called</span>
+                            <span className="px-3 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300 shadow-sm rounded-full text-[11px] font-bold uppercase tracking-widest flex items-center inline-flex gap-1.5 border border-emerald-200 dark:border-emerald-500/30">
+                              <span className="material-symbols-outlined text-[14px] animate-pulse">campaign</span>
+                              NOW SERVING
+                            </span>
                           </td>
                           <td className="px-md py-3 text-body-md text-on-surface-variant">
                             {new Date(currentlyCalledToken.joinedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -353,14 +314,14 @@ const Dashboard = () => {
                             <div className="flex justify-end gap-2">
                               <button 
                                 onClick={() => completeToken(currentlyCalledToken._id)}
-                                className="p-2 text-tertiary hover:bg-tertiary/10 rounded-lg transition-colors" 
+                                className="p-2 text-emerald-600 hover:bg-emerald-100 dark:text-emerald-400 dark:hover:bg-emerald-500/20 rounded-lg transition-colors" 
                                 title="Complete"
                               >
                                 <span className="material-symbols-outlined">check_circle</span>
                               </button>
                               <button 
                                 onClick={() => skipToken(currentlyCalledToken._id)}
-                                className="p-2 text-outline hover:bg-surface-variant rounded-lg transition-colors" 
+                                className="p-2 text-error hover:bg-error/10 rounded-lg transition-colors" 
                                 title="Skip"
                               >
                                 <span className="material-symbols-outlined">block</span>
@@ -370,8 +331,8 @@ const Dashboard = () => {
                         </tr>
                       )}
 
-                      {/* Waiting Rows */}
-                      {activeQueue.filter(t => t.status === 'WAITING').map((token) => (
+                      {/* Recalled and Waiting Rows */}
+                      {activeQueue.filter(t => t.status === 'RECALLED' || t.status === 'WAITING').map((token) => (
                         <tr key={token._id} className="hover:bg-surface-container-low transition-colors h-16">
                           <td className="px-md py-3">
                             <span className="font-bold text-on-surface-variant text-body-md">#{token.tokenNumber}</span>
@@ -380,7 +341,14 @@ const Dashboard = () => {
                             <p className="font-bold text-on-background text-body-md">{token.patientName}</p>
                           </td>
                           <td className="px-md py-3">
-                            <span className="px-3 py-1 bg-surface-container-high text-on-surface-variant rounded-full text-label-sm">Waiting</span>
+                            {token.status === 'RECALLED' ? (
+                                <span className="px-3 py-1 bg-error/10 text-error rounded-full text-[11px] uppercase tracking-wider font-bold flex items-center inline-flex gap-1">
+                                   <span className="material-symbols-outlined text-[14px]">priority_high</span>
+                                   Recalled
+                                </span>
+                            ) : (
+                                <span className="px-3 py-1 bg-surface-container-high text-on-surface-variant rounded-full text-label-sm">Waiting</span>
+                            )}
                           </td>
                           <td className="px-md py-3 text-body-md text-on-surface-variant">
                             {new Date(token.joinedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -391,7 +359,33 @@ const Dashboard = () => {
                         </tr>
                       ))}
 
-                      {activeQueue.filter(t => t.status === 'WAITING').length === 0 && !currentlyCalledToken && (
+                      {/* Skipped Rows */}
+                      {activeQueue.filter(t => t.status === 'SKIPPED').map((token) => (
+                        <tr key={token._id} className="hover:bg-surface-container-low transition-colors h-16 opacity-75">
+                          <td className="px-md py-3">
+                            <span className="font-bold text-on-surface-variant text-body-md line-through">#{token.tokenNumber}</span>
+                          </td>
+                          <td className="px-md py-3">
+                            <p className="font-bold text-on-surface-variant text-body-md">{token.patientName}</p>
+                          </td>
+                          <td className="px-md py-3">
+                            <span className="px-3 py-1 bg-surface-container border border-outline-variant text-on-surface-variant rounded-full uppercase tracking-wider text-[11px] font-bold">Skipped</span>
+                          </td>
+                          <td className="px-md py-3 text-body-md text-on-surface-variant">
+                            {new Date(token.joinedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </td>
+                          <td className="px-md py-3 text-right">
+                            <button 
+                               onClick={() => recallToken(token._id)}
+                               className="px-4 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-bold transition-colors shadow-sm"
+                            >
+                               Recall
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {activeQueue.filter(t => ['WAITING', 'RECALLED', 'SKIPPED'].includes(t.status)).length === 0 && !currentlyCalledToken && (
                         <tr>
                           <td colSpan="5" className="px-md py-12 text-center text-on-surface-variant text-body-md">
                             Queue is empty. Add a patient to generate a token.

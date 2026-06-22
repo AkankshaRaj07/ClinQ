@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const queueRoutes = require('./routes/queueRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const historyRoutes = require('./routes/historyRoutes');
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/queue', queueRoutes);
+app.use('/api/history', historyRoutes);
 app.use('/api/analytics', analyticsRoutes);
 
 // Base route
